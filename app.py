@@ -1,9 +1,21 @@
 from flask import Flask, jsonify, request, Response
+from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token
+from flask_jwt_extended import jwt_required, jwt_refresh_token_required, get_jwt_identity, get_raw_jwt
+from passlib.hash import pbkdf2_sha256 as sha256
 from flask_pymongo import PyMongo
+from bson.objectid import ObjectId
+from bson import json_util
 import json
+
+def generate_hash(password):
+    return sha256.hash(password)
+def verify_hash(password, hash):
+    return sha256.verify(password, hash)
 
 app = Flask(__name__)
 app.config['MONGO_URI'] = 'mongodb://127.0.0.1:27017/strikeoff'
+app.config['JWT_SECRET_KEY'] = 'strike-off'
+jwt = JWTManager(app)
 
 mongo = PyMongo(app)
 
@@ -33,31 +45,58 @@ def register():
         response = json.dumps({'sucess': False, 'message': 'Mobile already exists.'})
         status_code = 409
     else:
-        data = {'email': email, "password": password, 'name': name}
+        data = {'email': email, "password": generate_hash(password), 'name': name}
         if mobile: data.update({'mobile': mobile})
         user_id = mongo.db.users.insert(data)
-        response = json.dumps({'sucess': True, 'id': str(user_id)})
+        access_token = create_access_token(identity = str(user_id))
+        refresh_token = create_refresh_token(identity= str(user_id))
+        response = json.dumps({'sucess': True, 'id': str(user_id), 'access_token': access_token, 'refresh_token': refresh_token})
         status_code = 201
     return Response(response, status=status_code, mimetype='application/json')
 
 @app.route('/login', methods = ['POST'])
 def login():
     body = request.get_json()
-    user_id = body.get('user_id')
-    password = body.get('password')
-    if user_id.isdigit():
-        user = mongo.db.users.find_one({"mobile": user_id})
+    username = body.get('username', '')
+    password = body.get('password', '')
+    if username == '' or password == '':
+        response = json.dumps({'sucess': False, 'message': 'User ID and password are required.'})
+        status_code = 400
     else:
-        user = mongo.db.users.find_one({"email": user_id})
-    if user:
-        if password == user["password"]:
-            user['_id'] = str(user['_id'])
-            response = json.dumps({'sucess': True, 'message': 'Successfully logged in.', 'user_data': user})
-            status_code = 200
+        if username.isdigit():
+            user = mongo.db.users.find_one({"mobile": username})
         else:
-            response = json.dumps({'sucess': False, 'message': 'Wrong Password.'})
-            status_code = 403
-    else:
-        response = json.dumps({'sucess': False, 'message': 'User doesn\'t exist.'})
-        status_code = 403
+            user = mongo.db.users.find_one({"email": username})
+        if user:
+            if verify_hash(password, user["password"]):
+                # user['_id'] = str(user['_id'])
+                # del(user['password'])
+                access_token = create_access_token(identity = str(user["_id"]))
+                refresh_token = create_refresh_token(identity= str(user["_id"]))
+                response = json.dumps({'sucess': True, 'message': 'Successfully logged in.', 'access_token': access_token, 'refresh_token': refresh_token})
+                status_code = 200
+            else:
+                response = json.dumps({'sucess': False, 'message': 'Wrong Password.'})
+                status_code = 403
+        else:
+            response = json.dumps({'sucess': False, 'message': 'User doesn\'t exist.'})
+            status_code = 404
     return Response(response, status=status_code, mimetype='application/json')
+
+@app.route('/refresh_token', methods = ['POST'])
+@jwt_refresh_token_required
+def refresh_token():
+    current_user = get_jwt_identity()
+    access_token = create_access_token(identity = current_user)
+    return {'access_token': access_token}
+
+@app.route('/user_detail', methods = ['GET'])
+@jwt_required
+def user_detail():
+    current_user_id = get_jwt_identity()
+    user = mongo.db.users.find_one({"_id": ObjectId(current_user_id)})
+    mobile = None
+    if 'mobile' in user:
+        mobile = user['mobile']
+    response = json.dumps({'name': user['name'],'email': user['email'], 'mobile': mobile})
+    return Response(response, status=200, mimetype='application/json')
