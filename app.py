@@ -1,11 +1,10 @@
 from flask import Flask, jsonify, request, Response
-from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token
+from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, set_access_cookies, set_refresh_cookies, unset_jwt_cookies
 from flask_jwt_extended import jwt_required, jwt_refresh_token_required, get_jwt_identity, get_raw_jwt
 from passlib.hash import pbkdf2_sha256 as sha256
 from flask_pymongo import PyMongo
 from bson.objectid import ObjectId
 from bson import json_util
-import json
 
 def generate_hash(password):
     return sha256.hash(password)
@@ -15,6 +14,9 @@ def verify_hash(password, hash):
 app = Flask(__name__)
 app.config['MONGO_URI'] = 'mongodb://127.0.0.1:27017/strikeoff'
 app.config['JWT_SECRET_KEY'] = 'strike-off'
+app.config['JWT_TOKEN_LOCATION'] = ['cookies']
+app.config['JWT_ACCESS_COOKIE_PATH'] = '/'
+app.config['JWT_REFRESH_COOKIE_PATH'] = '/refresh_token'
 jwt = JWTManager(app)
 
 mongo = PyMongo(app)
@@ -36,13 +38,13 @@ def register():
     email_exists_count = mongo.db.users.find({"email": email}).count() if email else 0
     mobile_exists_count = mongo.db.users.find({"mobile": mobile}).count() if mobile else 0
     if email == '' or password == '':
-        response = json.dumps({'sucess': False, 'message': 'Email and password are required.'})
+        response = jsonify({'sucess': False, 'message': 'Email and password are required.'})
         status_code = 400
     elif email_exists_count > 0:
-        response = json.dumps({'sucess': False, 'message': 'Email already exists.'})
+        response = jsonify({'sucess': False, 'message': 'Email already exists.'})
         status_code = 409
     elif mobile_exists_count > 0:
-        response = json.dumps({'sucess': False, 'message': 'Mobile already exists.'})
+        response = jsonify({'sucess': False, 'message': 'Mobile already exists.'})
         status_code = 409
     else:
         data = {'email': email, "password": generate_hash(password), 'name': name}
@@ -50,9 +52,11 @@ def register():
         user_id = mongo.db.users.insert(data)
         access_token = create_access_token(identity = str(user_id))
         refresh_token = create_refresh_token(identity= str(user_id))
-        response = json.dumps({'sucess': True, 'id': str(user_id), 'access_token': access_token, 'refresh_token': refresh_token})
+        response = jsonify({'sucess': True, 'id': str(user_id)})
         status_code = 201
-    return Response(response, status=status_code, mimetype='application/json')
+        set_access_cookies(response, access_token)
+        set_refresh_cookies(response, refresh_token)
+    return response, status_code
 
 @app.route('/login', methods = ['POST'])
 def login():
@@ -60,7 +64,7 @@ def login():
     username = body.get('username', '')
     password = body.get('password', '')
     if username == '' or password == '':
-        response = json.dumps({'sucess': False, 'message': 'User ID and password are required.'})
+        response = jsonify({'sucess': False, 'message': 'User ID and password are required.'})
         status_code = 400
     else:
         if username.isdigit():
@@ -73,22 +77,27 @@ def login():
                 # del(user['password'])
                 access_token = create_access_token(identity = str(user["_id"]))
                 refresh_token = create_refresh_token(identity= str(user["_id"]))
-                response = json.dumps({'sucess': True, 'message': 'Successfully logged in.', 'access_token': access_token, 'refresh_token': refresh_token})
+                response = jsonify({'sucess': True, 'message': 'Successfully logged in.'})
                 status_code = 200
+                set_access_cookies(response, access_token)
+                set_refresh_cookies(response, refresh_token)
             else:
-                response = json.dumps({'sucess': False, 'message': 'Wrong Password.'})
+                response = jsonify({'sucess': False, 'message': 'Wrong Password.'})
                 status_code = 403
         else:
-            response = json.dumps({'sucess': False, 'message': 'User doesn\'t exist.'})
+            response = jsonify({'sucess': False, 'message': 'User doesn\'t exist.'})
             status_code = 404
-    return Response(response, status=status_code, mimetype='application/json')
+    return response, status_code
 
-@app.route('/refresh_token', methods = ['POST'])
+@app.route('/refresh_token', methods = ['GET'])
 @jwt_refresh_token_required
 def refresh_token():
     current_user = get_jwt_identity()
     access_token = create_access_token(identity = current_user)
-    return {'access_token': access_token}
+    response = jsonify({'refresh': True})
+    set_access_cookies(response, access_token)
+    return response, 200
+
 
 @app.route('/user_detail', methods = ['GET'])
 @jwt_required
@@ -98,5 +107,11 @@ def user_detail():
     mobile = None
     if 'mobile' in user:
         mobile = user['mobile']
-    response = json.dumps({'name': user['name'],'email': user['email'], 'mobile': mobile})
-    return Response(response, status=200, mimetype='application/json')
+    response = jsonify({'name': user['name'],'email': user['email'], 'mobile': mobile})
+    return response, 200
+
+@app.route('/logout', methods = ['GET'])
+def logout():
+    response = jsonify({'sucess': True, 'message': 'Successfully logged out.'})
+    unset_jwt_cookies(response)
+    return response, 200
