@@ -38,13 +38,13 @@ def register():
     email_exists_count = mongo.db.users.find({"email": email}).count() if email else 0
     mobile_exists_count = mongo.db.users.find({"mobile": mobile}).count() if mobile else 0
     if email == '' or password == '':
-        response = jsonify({'sucess': False, 'message': 'Email and password are required.'})
+        response = jsonify({'sucess': False, 'msg': 'Email and password are required.'})
         status_code = 400
     elif email_exists_count > 0:
-        response = jsonify({'sucess': False, 'message': 'Email already exists.'})
+        response = jsonify({'sucess': False, 'msg': 'Email already exists.'})
         status_code = 409
     elif mobile_exists_count > 0:
-        response = jsonify({'sucess': False, 'message': 'Mobile already exists.'})
+        response = jsonify({'sucess': False, 'msg': 'Mobile already exists.'})
         status_code = 409
     else:
         data = {'email': email, "password": generate_hash(password), 'name': name}
@@ -64,7 +64,7 @@ def login():
     username = body.get('username', '')
     password = body.get('password', '')
     if username == '' or password == '':
-        response = jsonify({'sucess': False, 'message': 'User ID and password are required.'})
+        response = jsonify({'sucess': False, 'msg': 'User ID and password are required.'})
         status_code = 400
     else:
         if username.isdigit():
@@ -77,15 +77,15 @@ def login():
                 # del(user['password'])
                 access_token = create_access_token(identity = str(user["_id"]))
                 refresh_token = create_refresh_token(identity= str(user["_id"]))
-                response = jsonify({'sucess': True, 'message': 'Successfully logged in.'})
+                response = jsonify({'sucess': True, 'msg': 'Successfully logged in.'})
                 status_code = 200
                 set_access_cookies(response, access_token)
                 set_refresh_cookies(response, refresh_token)
             else:
-                response = jsonify({'sucess': False, 'message': 'Wrong Password.'})
+                response = jsonify({'sucess': False, 'msg': 'Wrong Password.'})
                 status_code = 403
         else:
-            response = jsonify({'sucess': False, 'message': 'User doesn\'t exist.'})
+            response = jsonify({'sucess': False, 'msg': 'User doesn\'t exist.'})
             status_code = 404
     return response, status_code
 
@@ -112,6 +112,6 @@ def user_detail():
 
 @app.route('/logout', methods = ['GET'])
 def logout():
-    response = jsonify({'sucess': True, 'message': 'Successfully logged out.'})
+    response = jsonify({'sucess': True, 'msg': 'Successfully logged out.'})
     unset_jwt_cookies(response)
     return response, 200
